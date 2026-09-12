@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { q, type CalculationResult, type CalculationFn } from './calculation'
+import {
+  q,
+  verdictFromSafety,
+  type CalculationResult,
+  type CalculationFn,
+} from './calculation'
 
 describe('q()', () => {
   it('baut eine Quantity mit Symbol, Wert und SI-Einheit', () => {
@@ -63,5 +68,74 @@ describe('CalculationResult-Contract', () => {
     // ISO-8601, kein Date-Objekt
     expect(typeof result.timestamp).toBe('string')
     expect(new Date(result.timestamp).toISOString()).toBe(result.timestamp)
+  })
+})
+
+describe('verdictFromSafety()', () => {
+  // Referenzwerte: requiredSafety = 1.5, warnBand = 0.2
+  // ok erst ab safety >= 1.5 * 1.2 = 1.8
+  const required = 1.5
+  const band = 0.2
+
+  it('safety deutlich ueber requiredSafety -> ok', () => {
+    const { ratio, verdict } = verdictFromSafety(3.0, required, band)
+    expect(verdict).toBe('ok')
+    expect(ratio).toBeCloseTo(1 / 3.0)
+  })
+
+  it('safety knapp ueber requiredSafety, im Toleranzband -> warn', () => {
+    // 1.7 liegt ueber 1.5, aber unter 1.8
+    const { ratio, verdict } = verdictFromSafety(1.7, required, band)
+    expect(verdict).toBe('warn')
+    expect(ratio).toBeCloseTo(1 / 1.7)
+  })
+
+  it('safety exakt an der ok-Grenze (requiredSafety * (1 + warnBand)) -> ok', () => {
+    const { verdict } = verdictFromSafety(1.8, required, band)
+    expect(verdict).toBe('ok')
+  })
+
+  it('safety exakt gleich requiredSafety -> warn (bewusst gewaehlt)', () => {
+    // Grenzfall: Mindestsicherheit ist erreicht, aber ohne jeden Abstand.
+    // Bewusst 'warn' statt 'ok': erst das Toleranzband schafft Sicherheit.
+    // Nicht 'fail': die Norm-Anforderung ist formal erfuellt.
+    const { ratio, verdict } = verdictFromSafety(1.5, required, band)
+    expect(verdict).toBe('warn')
+    expect(ratio).toBeCloseTo(1 / 1.5)
+  })
+
+  it('safety unter requiredSafety -> fail', () => {
+    const { ratio, verdict } = verdictFromSafety(1.0, required, band)
+    expect(verdict).toBe('fail')
+    expect(ratio).toBeCloseTo(1.0)
+  })
+
+  it('safety 0 -> fail mit ratio Infinity, kein NaN', () => {
+    const { ratio, verdict } = verdictFromSafety(0, required, band)
+    expect(verdict).toBe('fail')
+    expect(ratio).toBe(Infinity)
+    expect(Number.isNaN(ratio)).toBe(false)
+  })
+
+  it('safety negativ -> fail mit ratio Infinity, kein NaN', () => {
+    const { ratio, verdict } = verdictFromSafety(-1.0, required, band)
+    expect(verdict).toBe('fail')
+    expect(ratio).toBe(Infinity)
+    expect(Number.isNaN(ratio)).toBe(false)
+  })
+
+  it('safety NaN -> fail, kein Crash', () => {
+    expect(verdictFromSafety(Number.NaN, required, band).verdict).toBe('fail')
+  })
+
+  it('safety Infinity (Nachweis ohne Last) -> ok mit ratio 0', () => {
+    const { ratio, verdict } = verdictFromSafety(Infinity, required, band)
+    expect(verdict).toBe('ok')
+    expect(ratio).toBe(0)
+  })
+
+  it('warnBand default 0.2 greift ohne dritten Parameter', () => {
+    expect(verdictFromSafety(1.7, required).verdict).toBe('warn')
+    expect(verdictFromSafety(1.8, required).verdict).toBe('ok')
   })
 })
